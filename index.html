@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>ОФА</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+body {
+  background:#000;
+  color:#f00;
+  font-family:Arial;
+  text-align:center;
+  margin:0;
+  padding:20px;
+}
+
+button {
+  background:#800000;
+  color:#fff;
+  border:none;
+  padding:12px;
+  cursor:pointer;
+  margin:8px 0;
+  width:100%;
+  font-size:16px;
+  border-radius:5px;
+}
+
+button:hover { background:#a00; }
+
+textarea, input {
+  width:100%;
+  background:#222;
+  color:#fff;
+  border:1px solid #444;
+  padding:10px;
+  margin:5px 0;
+  font-size:16px;
+  box-sizing:border-box;
+}
+
+.post {
+  border-left:4px solid #f00;
+  padding:15px;
+  margin:20px 0;
+  background:#151515;
+  text-align:left;
+}
+
+.comment {
+  background:#222;
+  padding:8px;
+  margin:8px 0;
+  border-bottom:1px solid #333;
+  font-size:14px;
+  color:#ccc;
+}
+
+.delete-btn {
+  background:#f00;
+  color:#fff;
+  border:none;
+  padding:2px 8px;
+  cursor:pointer;
+  float:right;
+  font-size:12px;
+}
+</style>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+</head>
+
+<body>
+
+<h1 id="title">Добро пожаловать в ОФА</h1>
+
+<div id="login">
+  <button onclick="loginAuthor()">Войти как автор</button>
+  <button onclick="loginUser()">Войти как пользователь</button>
+</div>
+
+<div id="authorPanel" style="display:none">
+  <h2>Новая статья</h2>
+  <input id="postTitle" placeholder="Заголовок">
+  <textarea id="postText" placeholder="Текст статьи"></textarea>
+  <button onclick="publish()">Опубликовать</button>
+</div>
+
+<h2 id="postsHeader" style="display:none">Лента ОФА</h2>
+<div id="posts" style="display:none"></div>
+
+<script>
+// Firebase
+const firebaseConfig = {
+  apiKey: "AIzaSyB3Ihim9lcyL5AKfXi055uMw_1--u7vYMQ",
+  authDomain: "liou-fea92.firebaseapp.com",
+  projectId: "liou-fea92",
+  storageBucket: "liou-fea92.appspot.com",
+  messagingSenderId: "1009858434231",
+  appId: "1:1009858434231:web:ddb05c5602188bf0012932",
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+let isAuthor = false;
+
+// LOGIN
+window.loginAuthor = () => {
+  const code = prompt("Введите код автора:");
+  if (code === "120812") {
+    isAuthor = true;
+    showApp("Режим автора");
+    document.getElementById("authorPanel").style.display = "block";
+  } else alert("Неверный код");
+};
+
+window.loginUser = () => {
+  isAuthor = false;
+  showApp("Режим пользователя");
+};
+
+function showApp(title) {
+  document.getElementById("login").style.display = "none";
+  document.getElementById("title").innerText = title;
+  document.getElementById("postsHeader").style.display = "block";
+  document.getElementById("posts").style.display = "block";
+  loadPosts();
+}
+
+// CREATE POST
+window.publish = async () => {
+  const title = document.getElementById("postTitle").value.trim();
+  const text = document.getElementById("postText").value.trim();
+
+  if (!title || !text) return alert("Заполни всё");
+
+  await db.collection("posts").add({
+    title,
+    text,
+    comments: [],
+    likes: 0,
+    author: "admin",
+    time: Date.now()
+  });
+
+  document.getElementById("postTitle").value = "";
+  document.getElementById("postText").value = "";
+};
+
+// LOAD POSTS
+function loadPosts() {
+  db.collection("posts").orderBy("time","desc").onSnapshot(snap => {
+    const postsDiv = document.getElementById("posts");
+    postsDiv.innerHTML = "";
+
+    snap.forEach(doc => {
+      const p = doc.data();
+      const id = doc.id;
+
+      const div = document.createElement("div");
+      div.className = "post";
+
+      let commentsHTML = (p.comments || []).map(c => `
+        <div class="comment">
+          ${escapeHtml(c.text)}
+          ${isAuthor && c.user !== "admin"
+            ? `<button class="delete-btn" onclick="deleteComment('${id}','${c.text}')">✖</button>`
+            : ""}
+        </div>
+      `).join("");
+
+      div.innerHTML = `
+        <h3>${escapeHtml(p.title)}</h3>
+        <p>${escapeHtml(p.text)}</p>
+
+        <button onclick="like('${id}', ${p.likes})">❤️ ${p.likes}</button>
+
+        ${commentsHTML}
+
+        <textarea id="c${id}" placeholder="Комментарий..."></textarea>
+        <button onclick="comment('${id}')">Отправить</button>
+
+        ${isAuthor
+          ? `<button style="background:#444" onclick="deletePost('${id}')">Удалить</button>`
+          : ""}
+      `;
+
+      postsDiv.appendChild(div);
+    });
+  });
+}
+
+// LIKE (fixed)
+window.like = async (id) => {
+  await db.collection("posts").doc(id).update({
+    likes: firebase.firestore.FieldValue.increment(1)
+  });
+};
+
+// COMMENT
+window.comment = async (id) => {
+  const input = document.getElementById("c"+id);
+  if (!input.value.trim()) return;
+
+  await db.collection("posts").doc(id).update({
+    comments: firebase.firestore.FieldValue.arrayUnion({
+      text: input.value.trim(),
+      user: isAuthor ? "admin" : "user"
+    })
+  });
+
+  input.value = "";
+};
+
+// DELETE COMMENT
+window.deleteComment = async (postId, text) => {
+  const ref = db.collection("posts").doc(postId);
+  const doc = await ref.get();
+  const comments = doc.data().comments || [];
+
+  const found = comments.find(c => c.text === text);
+  if (found) {
+    await ref.update({
+      comments: firebase.firestore.FieldValue.arrayRemove(found)
+    });
+  }
+};
+
+// DELETE POST
+window.deletePost = async (id) => {
+  if (confirm("Удалить?")) {
+    await db.collection("posts").doc(id).delete();
+  }
+};
+
+// SAFE TEXT
+function escapeHtml(text) {
+  return text
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;");
+}
+</script>
+
+</body>
+</html>
